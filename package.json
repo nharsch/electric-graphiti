@@ -11,7 +11,10 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "@electric-ax/agents-runtime": "^0.3.2"
+    "@electric-ax/agents-runtime": "^0.3.2",
+    "ink": "^7.0.3",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.6"
   },
   "devDependencies": {
     "tsx": "^4.22.3"
