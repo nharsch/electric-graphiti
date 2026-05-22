@@ -275,7 +275,9 @@ function Picker({ onSelect }: { onSelect: (id: string) => void }) {
   useEffect(() => {
     fetch(`${AGENTS_URL}/_electric/entities?type=${ENTITY_TYPE}`)
       .then(r => r.json())
-      .then((list: EntityInfo[]) => setEntities(list.sort((a, b) => b.updated_at - a.updated_at)))
+      .then((list: EntityInfo[]) => setEntities(
+        list.filter(e => e.status !== 'killed').sort((a, b) => b.updated_at - a.updated_at)
+      ))
       .catch(() => {})
   }, [])
 
