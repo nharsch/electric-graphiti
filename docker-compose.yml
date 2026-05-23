@@ -16,20 +16,19 @@ services:
       start_period: 10s
 
   server:
-    image: node:22-alpine
-    working_dir: /app
-    command: npx tsx server.ts
-    ports:
-      - "3000:3000"
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    network_mode: host
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - ELECTRIC_AGENTS_URL=http://host.docker.internal:4437
-      - SERVE_URL=http://host.docker.internal:3000
+      - ELECTRIC_AGENTS_URL=http://localhost:4437
+      - SERVE_URL=http://localhost:3000
+      - GRAPHITI_URL=http://localhost:7001
       - PORT=3000
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - .:/app
+    depends_on:
+      memory-processor:
+        condition: service_started
     restart: unless-stopped
 
   memory-processor:
