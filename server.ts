@@ -1,3 +1,6 @@
+import path from "node:path"
+try { process.loadEnvFile(path.resolve(import.meta.dirname, ".env")) } catch {}
+
 import http from "node:http"
 import {
   createEntityRegistry,

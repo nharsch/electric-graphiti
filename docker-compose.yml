@@ -1,0 +1,57 @@
+services:
+  neo4j:
+    image: neo4j:5.26.2
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+    environment:
+      - NEO4J_AUTH=neo4j/password
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 10s
+
+  server:
+    image: node:22-alpine
+    working_dir: /app
+    command: npx tsx server.ts
+    ports:
+      - "3000:3000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ELECTRIC_AGENTS_URL=http://host.docker.internal:4437
+      - SERVE_URL=http://host.docker.internal:3000
+      - PORT=3000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/app
+    restart: unless-stopped
+
+  memory-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - ELECTRIC_AGENTS_URL=http://host.docker.internal:4437
+      - ENTITY_TYPE=assistant
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    volumes:
+      - processor_data:/data
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:
+  processor_data:
