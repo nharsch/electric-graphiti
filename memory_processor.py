@@ -200,6 +200,27 @@ def process_batch(
     return pairs, last_offset
 
 
+MAX_EPISODE_CHARS = 2000
+
+
+def _chunk_text(text: str, max_chars: int) -> list[str]:
+    chunks: list[str] = []
+    while text:
+        if len(text) <= max_chars:
+            chunks.append(text)
+            break
+        split_at = text.rfind("\n\n", 0, max_chars)
+        if split_at == -1:
+            split_at = text.rfind(". ", 0, max_chars)
+        if split_at == -1:
+            split_at = max_chars
+        else:
+            split_at += 2
+        chunks.append(text[:split_at].strip())
+        text = text[split_at:].strip()
+    return [c for c in chunks if c]
+
+
 async def ingest_episode(
     graphiti: Graphiti,
     entity_id: str,
@@ -208,19 +229,22 @@ async def ingest_episode(
     ref_time: datetime,
 ) -> None:
     body = f"User: {user_text}\nAssistant: {assistant_text}"
-    name = f"exchange-{entity_id}-{int(ref_time.timestamp())}"
-    try:
-        await graphiti.add_episode(
-            name=name,
-            episode_body=body,
-            source_description=f"Electric Agents session {entity_id}",
-            reference_time=ref_time,
-            source=EpisodeType.message,
-            group_id=ENTITY_TYPE,
-        )
-        log.info("[%s] ingested episode %s", entity_id, name)
-    except Exception as exc:
-        log.error("[%s] ingest failed: %s", entity_id, exc)
+    chunks = _chunk_text(body, MAX_EPISODE_CHARS)
+    base_name = f"exchange-{entity_id}-{int(ref_time.timestamp())}"
+    for i, chunk in enumerate(chunks):
+        name = base_name if len(chunks) == 1 else f"{base_name}-part{i + 1}"
+        try:
+            await graphiti.add_episode(
+                name=name,
+                episode_body=chunk,
+                source_description=f"Electric Agents session {entity_id}",
+                reference_time=ref_time,
+                source=EpisodeType.message,
+                group_id=ENTITY_TYPE,
+            )
+            log.info("[%s] ingested episode %s", entity_id, name)
+        except Exception as exc:
+            log.error("[%s] ingest failed: %s", entity_id, exc)
 
 
 # ---------------------------------------------------------------------------
