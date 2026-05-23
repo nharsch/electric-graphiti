@@ -2,6 +2,7 @@ import path from "node:path"
 try { process.loadEnvFile(path.resolve(import.meta.dirname, ".env")) } catch {}
 
 import http from "node:http"
+import { Type } from "@sinclair/typebox"
 import {
   createEntityRegistry,
   createRuntimeHandler,
@@ -12,6 +13,7 @@ const ELECTRIC_AGENTS_URL =
   process.env.ELECTRIC_AGENTS_URL ?? "http://localhost:4437"
 const PORT = Number(process.env.PORT ?? 3000)
 const SERVE_URL = process.env.SERVE_URL ?? `http://localhost:${PORT}`
+const GRAPHITI_URL = process.env.GRAPHITI_URL ?? "http://localhost:7001"
 
 const registry = createEntityRegistry()
 
@@ -47,6 +49,40 @@ const runtime = createRuntimeHandler({
   baseUrl: ELECTRIC_AGENTS_URL,
   serveEndpoint: `${SERVE_URL}/webhook`,
   registry,
+  async createElectricTools({ entityUrl }) {
+    const entityId = entityUrl.split("/").at(-1) ?? entityUrl
+    return [{
+      name: "graphiti_search",
+      label: "Memory Search",
+      description: "Search the temporal knowledge graph for facts, entities, and context from past conversations with this agent.",
+      parameters: Type.Object({
+        query: Type.String({ description: "Natural language query — what to recall or look up" }),
+      }),
+      async execute(_id: string, { query }: { query: string }) {
+        try {
+          const res = await fetch(`${GRAPHITI_URL}/search`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query, group_id: entityId }),
+            signal: AbortSignal.timeout(15_000),
+          })
+          const data = await res.json() as { results?: unknown; error?: string }
+          if (data.error) throw new Error(data.error)
+          const text = JSON.stringify(data.results, null, 2)
+          return {
+            content: [{ type: "text" as const, text }],
+            details: { entityId },
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          return {
+            content: [{ type: "text" as const, text: `Search failed: ${msg}` }],
+            details: { entityId },
+          }
+        }
+      },
+    }]
+  },
 })
 
 const server = http.createServer(async (req, res) => {

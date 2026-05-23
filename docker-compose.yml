@@ -36,6 +36,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    ports:
+      - "7001:7001"
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - NEO4J_URI=bolt://neo4j:7687
@@ -43,6 +45,7 @@ services:
       - NEO4J_PASSWORD=password
       - ELECTRIC_AGENTS_URL=http://host.docker.internal:4437
       - ENTITY_TYPE=assistant
+      - SEARCH_PORT=7001
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

@@ -5,7 +5,8 @@ WORKDIR /app
 RUN pip install --no-cache-dir \
     "graphiti-core[anthropic]" \
     httpx \
-    fastembed
+    fastembed \
+    aiohttp
 
 COPY memory_processor.py .
 

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from aiohttp import web
 from anthropic import AsyncAnthropic
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.client import CrossEncoderClient
@@ -34,6 +35,7 @@ ENTITY_TYPE = os.environ.get("ENTITY_TYPE", "assistant")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 OFFSETS_FILE = Path(os.environ.get("OFFSETS_FILE", "/data/offsets.json"))
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
+SEARCH_PORT = int(os.environ.get("SEARCH_PORT", "7001"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -319,6 +321,44 @@ async def get_entities(http: httpx.AsyncClient) -> list[str]:
         return []
 
 
+def _serialize(obj: Any) -> Any:
+    if hasattr(obj, "model_dump"):
+        return _serialize(obj.model_dump())
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: _serialize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_serialize(i) for i in obj]
+    return obj
+
+
+def create_search_app(graphiti: Graphiti) -> web.Application:
+    async def handle_search(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        query = body.get("query", "").strip()
+        if not query:
+            return web.json_response({"error": "query is required"}, status=400)
+
+        group_id = body.get("group_id")
+        group_ids = [group_id] if group_id else None
+
+        try:
+            results = await graphiti.search(query, group_ids=group_ids)
+            return web.json_response({"results": _serialize(results)})
+        except Exception as exc:
+            log.error("Search failed: %s", exc)
+            return web.json_response({"error": str(exc)}, status=500)
+
+    app = web.Application()
+    app.router.add_post("/search", handle_search)
+    return app
+
+
 async def main() -> None:
     if not ANTHROPIC_API_KEY:
         raise SystemExit("ANTHROPIC_API_KEY is not set")
@@ -333,6 +373,13 @@ async def main() -> None:
     graphiti = Graphiti(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, llm_client=llm, embedder=embedder, cross_encoder=NoOpCrossEncoder())
     await graphiti.build_indices_and_constraints()
     log.info("Graphiti ready")
+
+    search_app = create_search_app(graphiti)
+    runner = web.AppRunner(search_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", SEARCH_PORT)
+    await site.start()
+    log.info("Search server listening on port %d", SEARCH_PORT)
 
     offsets = load_offsets()
     watchers: dict[str, asyncio.Task] = {}
