@@ -49,8 +49,7 @@ const runtime = createRuntimeHandler({
   baseUrl: ELECTRIC_AGENTS_URL,
   serveEndpoint: `${SERVE_URL}/webhook`,
   registry,
-  async createElectricTools({ entityUrl }) {
-    const entityId = entityUrl.split("/").at(-1) ?? entityUrl
+  async createElectricTools({ entityUrl, entityType }) {
     return [{
       name: "graphiti_search",
       label: "Memory Search",
@@ -63,7 +62,7 @@ const runtime = createRuntimeHandler({
           const res = await fetch(`${GRAPHITI_URL}/search`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query, group_id: entityId }),
+            body: JSON.stringify({ query, group_id: entityType }),
             signal: AbortSignal.timeout(15_000),
           })
           const data = await res.json() as { results?: unknown; error?: string }
@@ -71,13 +70,13 @@ const runtime = createRuntimeHandler({
           const text = JSON.stringify(data.results, null, 2)
           return {
             content: [{ type: "text" as const, text }],
-            details: { entityId },
+            details: { entityType },
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           return {
             content: [{ type: "text" as const, text: `Search failed: ${msg}` }],
-            details: { entityId },
+            details: { entityType },
           }
         }
       },

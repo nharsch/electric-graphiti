@@ -216,7 +216,7 @@ async def ingest_episode(
             source_description=f"Electric Agents session {entity_id}",
             reference_time=ref_time,
             source=EpisodeType.message,
-            group_id=entity_id,
+            group_id=ENTITY_TYPE,
         )
         log.info("[%s] ingested episode %s", entity_id, name)
     except Exception as exc:
