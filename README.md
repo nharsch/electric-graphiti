@@ -24,20 +24,18 @@ graph TB
         TUI["Ink TUI"]
     end
 
-    subgraph docker["Docker"]
-        subgraph electric["Electric Agents Runtime"]
-            STREAM["Durable Stream\n/assistant/{id}"]
-        end
+    subgraph electric["Electric Agents Runtime"]
+        STREAM["Durable Stream\n/assistant/{id}"]
+    end
 
-        subgraph server["Agent Server (server.ts)"]
-            HANDLER["Entity Handler\n(LLM loop)"]
-            TOOLS["Tools\nbash · fetch_url · graphiti_search"]
-        end
+    subgraph server["Agent Server (server.ts)"]
+        HANDLER["Entity Handler\n(LLM loop)"]
+        TOOLS["Tools\nbash · fetch_url · graphiti_search"]
+    end
 
-        subgraph memory["Memory Layer"]
-            PROC["Memory Processor\n(SSE watcher)"]
-            NEO4J["Neo4j\n(knowledge graph)"]
-        end
+    subgraph memory["Memory Layer"]
+        PROC["Memory Processor\n(SSE watcher)"]
+        NEO4J["Neo4j\n(knowledge graph)"]
     end
 
     CLAUDE["Anthropic API"]
