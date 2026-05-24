@@ -33,7 +33,16 @@ registry.define("assistant", {
   async handler(ctx) {
     console.log(`[handler] wake for ${ctx.entityUrl}, apiKey present: ${!!ANTHROPIC_API_KEY}`)
     ctx.useAgent({
-      systemPrompt: "You are a helpful assistant with access to bash and web fetch. Keep responses concise.",
+      systemPrompt: `You are a helpful assistant with access to bash, web fetch, and persistent memory.
+
+When you identify something worth remembering — a factual claim, user preference, or receive a document for ingestion — call add_episode:
+- fact_triple: an explicit factual assertion ("user prefers X", "project uses Y", "X is defined as Y")
+- text: a document, article, or unstructured corpus handed to you
+- json: structured data
+
+Conversational exchanges don't need explicit episodes. Search your memory with graphiti_search when context from past sessions may be relevant.
+
+Keep responses concise.`,
       model: "claude-sonnet-4-5-20250929",
       getApiKey: async (provider) => {
         console.log(`[getApiKey] called for provider: ${provider}, key present: ${!!ANTHROPIC_API_KEY}`)
@@ -45,12 +54,64 @@ registry.define("assistant", {
   },
 })
 
+registry.define("episodes", {
+  description: "Durable episode stream — write target for knowledge graph ingestion",
+  async handler(_ctx) {
+    // No-op: this entity is a write target only; the knowledge processor tails the stream
+  },
+})
+
 const runtime = createRuntimeHandler({
   baseUrl: ELECTRIC_AGENTS_URL,
   serveEndpoint: `${SERVE_URL}/webhook`,
   registry,
   async createElectricTools({ entityUrl, entityType }) {
     return [{
+      name: "add_episode",
+      label: "Write Episode",
+      description: "Write a knowledge episode to long-term memory. Use for factual claims, user preferences, or documents for ingestion.",
+      parameters: Type.Object({
+        name: Type.String({ description: "Short label for this episode" }),
+        episode_body: Type.String({ description: "Content to store" }),
+        source: Type.Union([
+          Type.Literal("fact_triple"),
+          Type.Literal("text"),
+          Type.Literal("json"),
+        ], { description: "fact_triple: explicit assertion. text: document/corpus. json: structured data." }),
+        source_description: Type.String({ description: "Where this came from, e.g. 'user stated', 'uploaded document'" }),
+        custom_extraction_instructions: Type.Optional(Type.String({ description: "Hint to Graphiti about what to extract" })),
+      }),
+      async execute(_id: string, params: {
+        name: string
+        episode_body: string
+        source: "fact_triple" | "text" | "json"
+        source_description: string
+        custom_extraction_instructions?: string
+      }) {
+        try {
+          const res = await fetch(`${ELECTRIC_AGENTS_URL}/_electric/entities/episodes/main/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              payload: {
+                name: params.name,
+                episode_body: params.episode_body,
+                source: params.source,
+                source_description: params.source_description,
+                group_id: entityType,
+                custom_extraction_instructions: params.custom_extraction_instructions,
+              },
+            }),
+            signal: AbortSignal.timeout(10_000),
+          })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          return { content: [{ type: "text" as const, text: `Episode written: ${params.name}` }] }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          return { content: [{ type: "text" as const, text: `Failed to write episode: ${msg}` }] }
+        }
+      },
+    }, {
       name: "graphiti_search",
       label: "Memory Search",
       description: "Search the temporal knowledge graph for facts, entities, and context from past conversations with this agent.",

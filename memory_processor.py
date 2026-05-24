@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """
-Memory processor: tails Electric Agent streams, ingests message-pair episodes into Graphiti.
+Knowledge processor: tails the Episodes entity stream, ingests into Graphiti KG.
 
-For each live entity:
-  - Loads history from last saved offset (or full history on first run)
-  - Pairs user inbox messages with completed assistant text events
-  - Calls graphiti.add_episode() per pair
-  - Saves offset after each ingestion so restarts resume without re-ingesting
+Episodes are written by source agents via the add_episode tool.
+Each inbox event on /episodes/main/main -> graphiti.add_episode()
 """
 
 import asyncio
@@ -31,14 +28,16 @@ ELECTRIC_URL = os.environ.get("ELECTRIC_AGENTS_URL", "http://host.docker.interna
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "password")
-ENTITY_TYPE = os.environ.get("ENTITY_TYPE", "assistant")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 OFFSETS_FILE = Path(os.environ.get("OFFSETS_FILE", "/data/offsets.json"))
-POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
 SEARCH_PORT = int(os.environ.get("SEARCH_PORT", "7001"))
+EPISODES_STREAM = os.environ.get("EPISODES_STREAM", "/episodes/main/main")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
+
+VALID_SOURCES = {e.value for e in EpisodeType}
+MAX_EPISODE_CHARS = 2000
 
 
 # ---------------------------------------------------------------------------
@@ -156,52 +155,8 @@ def save_offsets(offsets: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Stream processing
+# Episode ingestion
 # ---------------------------------------------------------------------------
-
-def process_batch(
-    events: list,
-    pending_user: dict[str, str],
-    text_buffers: dict[str, list[str]],
-) -> tuple[list[tuple[str, str, datetime]], str | None]:
-    """
-    Walk a batch of stream events, pair user+assistant turns.
-    Returns (pairs_to_ingest, last_seen_offset).
-    Mutates pending_user and text_buffers in place.
-    """
-    pairs: list[tuple[str, str, datetime]] = []
-    last_offset: str | None = None
-
-    for e in events:
-        last_offset = e["headers"]["offset"]
-        v = e.get("value", {})
-        etype = e.get("type")
-        op = e["headers"].get("operation")
-
-        if etype == "inbox" and op == "insert":
-            payload = v.get("payload")
-            text = payload if isinstance(payload, str) else (payload or {}).get("text")
-            if text:
-                pending_user[e["key"]] = text
-
-        elif etype == "text_delta":
-            tid = v.get("text_id")
-            if tid:
-                text_buffers.setdefault(tid, []).append(v.get("delta", ""))
-
-        elif etype == "text" and op == "update" and v.get("status") == "completed":
-            buf = text_buffers.pop(e["key"], None)
-            if buf and pending_user:
-                assistant_text = "".join(buf)
-                inbox_key = next(iter(pending_user))
-                user_text = pending_user.pop(inbox_key)
-                pairs.append((user_text, assistant_text, datetime.now(timezone.utc)))
-
-    return pairs, last_offset
-
-
-MAX_EPISODE_CHARS = 2000
-
 
 def _chunk_text(text: str, max_chars: int) -> list[str]:
     chunks: list[str] = []
@@ -221,68 +176,68 @@ def _chunk_text(text: str, max_chars: int) -> list[str]:
     return [c for c in chunks if c]
 
 
-async def ingest_episode(
-    graphiti: Graphiti,
-    entity_id: str,
-    user_text: str,
-    assistant_text: str,
-    ref_time: datetime,
-) -> None:
-    body = f"User: {user_text}\nAssistant: {assistant_text}"
-    chunks = _chunk_text(body, MAX_EPISODE_CHARS)
-    base_name = f"exchange-{entity_id}-{int(ref_time.timestamp())}"
+async def ingest_episode(graphiti: Graphiti, payload: dict) -> None:
+    ref_time = datetime.now(timezone.utc)
+    name = payload.get("name") or f"episode-{int(ref_time.timestamp())}"
+    episode_body = payload.get("episode_body", "")
+    source_str = payload.get("source", "message")
+    source_description = payload.get("source_description", "agent episode")
+    group_id = payload.get("group_id") or "default"
+    custom_instructions = payload.get("custom_extraction_instructions")
+
+    source = EpisodeType(source_str) if source_str in VALID_SOURCES else EpisodeType.message
+
+    if not episode_body:
+        log.warning("Skipping episode with empty body: %s", name)
+        return
+
+    chunks = _chunk_text(episode_body, MAX_EPISODE_CHARS)
     for i, chunk in enumerate(chunks):
-        name = base_name if len(chunks) == 1 else f"{base_name}-part{i + 1}"
+        chunk_name = name if len(chunks) == 1 else f"{name}-part{i + 1}"
         try:
             await graphiti.add_episode(
-                name=name,
+                name=chunk_name,
                 episode_body=chunk,
-                source_description=f"Electric Agents session {entity_id}",
+                source_description=source_description,
                 reference_time=ref_time,
-                source=EpisodeType.message,
-                group_id=ENTITY_TYPE,
+                source=source,
+                group_id=group_id,
+                custom_extraction_instructions=custom_instructions,
             )
-            log.info("[%s] ingested episode %s", entity_id, name)
+            log.info("[%s] ingested %s (group=%s)", source_str, chunk_name, group_id)
         except Exception as exc:
-            log.error("[%s] ingest failed: %s", entity_id, exc)
+            log.error("Ingest failed for %s: %s", chunk_name, exc)
 
 
 # ---------------------------------------------------------------------------
-# Per-entity stream watcher
+# Episodes stream watcher
 # ---------------------------------------------------------------------------
 
-async def watch_entity(
-    entity_id: str,
-    graphiti: Graphiti,
-    offsets: dict,
-    http: httpx.AsyncClient,
-) -> None:
-    stream_url = f"{ELECTRIC_URL}/{ENTITY_TYPE}/{entity_id}/main"
-    pending_user: dict[str, str] = {}
-    text_buffers: dict[str, list[str]] = {}
+async def watch_episodes_stream(graphiti: Graphiti, offsets: dict, http: httpx.AsyncClient) -> None:
+    stream_url = f"{ELECTRIC_URL}{EPISODES_STREAM}"
+    log.info("Watching episodes stream: %s", stream_url)
 
-    # Resume from saved offset, or load full history on first run
-    start_offset = offsets.get(entity_id, "-1")
-    log.info("[%s] starting from offset %s", entity_id, start_offset)
+    start_offset = offsets.get("episodes", "-1")
+    log.info("Starting from offset %s", start_offset)
 
     # Batch-load history up to current tip
     try:
         r = await http.get(f"{stream_url}?offset={start_offset}", timeout=30)
         if r.is_success:
-            events = r.json()
-            pairs, last_offset = process_batch(events, pending_user, text_buffers)
-            for pair in pairs:
-                await ingest_episode(graphiti, entity_id, *pair)
-            # Use last event offset, falling back to stream-next-offset header
-            tip = last_offset or r.headers.get("stream-next-offset")
+            for e in r.json():
+                if e.get("type") == "inbox" and e["headers"].get("operation") == "insert":
+                    payload = (e.get("value") or {}).get("payload") or {}
+                    if payload:
+                        await ingest_episode(graphiti, payload)
+            tip = r.headers.get("stream-next-offset")
             if tip:
-                offsets[entity_id] = tip
+                offsets["episodes"] = tip
                 save_offsets(offsets)
     except Exception as exc:
-        log.warning("[%s] history load failed: %s", entity_id, exc)
+        log.warning("History load failed: %s", exc)
 
-    # Live SSE tail — offset must be a valid stream offset string, not "0"
-    current_offset = offsets.get(entity_id, "-1")
+    # Live SSE tail
+    current_offset = offsets.get("episodes", "-1")
     while True:
         try:
             async with http.stream(
@@ -291,7 +246,7 @@ async def watch_entity(
                 timeout=None,
             ) as resp:
                 if resp.status_code != 200:
-                    log.warning("[%s] SSE returned %s, retrying in 5s", entity_id, resp.status_code)
+                    log.warning("SSE returned %s, retrying in 5s", resp.status_code)
                     await asyncio.sleep(5)
                     continue
                 buf = ""
@@ -312,38 +267,26 @@ async def watch_entity(
                         if event_type == "control":
                             ctrl = json.loads(data_str)
                             current_offset = ctrl.get("streamNextOffset", current_offset)
-                            offsets[entity_id] = current_offset
+                            offsets["episodes"] = current_offset
                             save_offsets(offsets)
 
                         elif event_type == "data":
-                            events = json.loads(data_str)
-                            pairs, _ = process_batch(events, pending_user, text_buffers)
-                            for pair in pairs:
-                                await ingest_episode(graphiti, entity_id, *pair)
+                            for e in json.loads(data_str):
+                                if e.get("type") == "inbox" and e["headers"].get("operation") == "insert":
+                                    payload = (e.get("value") or {}).get("payload") or {}
+                                    if payload:
+                                        await ingest_episode(graphiti, payload)
 
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.warning("[%s] SSE error: %s — reconnecting in 5s", entity_id, exc)
+            log.warning("SSE error: %s — reconnecting in 5s", exc)
             await asyncio.sleep(5)
 
 
 # ---------------------------------------------------------------------------
-# Main loop — discovers entities and spawns watchers
+# Search HTTP server
 # ---------------------------------------------------------------------------
-
-async def get_entities(http: httpx.AsyncClient) -> list[str]:
-    try:
-        r = await http.get(f"{ELECTRIC_URL}/_electric/entities?type={ENTITY_TYPE}", timeout=10)
-        return [
-            e["url"].split("/")[-1]
-            for e in r.json()
-            if e.get("status") != "killed"
-        ]
-    except Exception as exc:
-        log.warning("Entity list failed: %s", exc)
-        return []
-
 
 def _serialize(obj: Any) -> Any:
     if hasattr(obj, "model_dump"):
@@ -383,18 +326,26 @@ def create_search_app(graphiti: Graphiti) -> web.Application:
     return app
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 async def main() -> None:
     if not ANTHROPIC_API_KEY:
         raise SystemExit("ANTHROPIC_API_KEY is not set")
 
-    log.info("Memory processor starting")
-    log.info("  Electric: %s", ELECTRIC_URL)
-    log.info("  Neo4j:    %s", NEO4J_URI)
+    log.info("Knowledge processor starting")
+    log.info("  Electric:        %s", ELECTRIC_URL)
+    log.info("  Neo4j:           %s", NEO4J_URI)
+    log.info("  Episodes stream: %s", EPISODES_STREAM)
 
     llm = AnthropicLLMClient(ANTHROPIC_API_KEY)
     embedder = FastEmbedder()
 
-    graphiti = Graphiti(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, llm_client=llm, embedder=embedder, cross_encoder=NoOpCrossEncoder())
+    graphiti = Graphiti(
+        NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD,
+        llm_client=llm, embedder=embedder, cross_encoder=NoOpCrossEncoder(),
+    )
     await graphiti.build_indices_and_constraints()
     log.info("Graphiti ready")
 
@@ -406,18 +357,8 @@ async def main() -> None:
     log.info("Search server listening on port %d", SEARCH_PORT)
 
     offsets = load_offsets()
-    watchers: dict[str, asyncio.Task] = {}
-
     async with httpx.AsyncClient() as http:
-        while True:
-            entity_ids = await get_entities(http)
-            for eid in entity_ids:
-                if eid not in watchers or watchers[eid].done():
-                    log.info("Spawning watcher for %s", eid)
-                    watchers[eid] = asyncio.create_task(
-                        watch_entity(eid, graphiti, offsets, http)
-                    )
-            await asyncio.sleep(POLL_INTERVAL)
+        await watch_episodes_stream(graphiti, offsets, http)
 
 
 if __name__ == "__main__":
