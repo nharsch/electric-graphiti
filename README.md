@@ -8,54 +8,79 @@ The result: agents that remember — not just within a session, but across sessi
 
 ## Why
 
-Most agent frameworks give you ephemeral memory. When the session ends, the agent forgets. The common workarounds fall short:
+I fully subscribe to the core claim of Electric Agents:
 
-- **Vector search** — no entity resolution, no temporal tracking, no relationship traversal
-- **Raw session history** — full fidelity, but hits token limits fast and can't be queried
-- **Managed agent sessions** — no cross-session memory, sessions aren't pluggable
+> Agents are not compute. Agents are data. Multi-agent is a sync problem.
+- [Electric](https://electric.ax/blog/2026/04/29/introducing-electric-agents)
 
-Electric solves addressability. Graphiti solves structure. Together they cover what neither does alone.
+This project investigates how a multi-agent knowledge store could work on top of an Agent Stream graph.
+
+Zep's [Graphiti](https://github.com/getzep/graphiti) takes a very "stream processing" appraoch to building a Knowledge Graph, where **Episodes** map to a stream of incoming knowledge events, and the **Semantic Entity Graph** and **Communicty Graph** are views on that stream:
+
+```mermaid
+flowchart LR
+Episodes --> KG[Semantic Entities / Knowledge Graph]
+KG --> CG[Community Graph]
+```
 
 ## How it works
 
 ```mermaid
-graph TB
-    subgraph client["Client"]
-        TUI["Ink TUI"]
+flowchart TD
+    subgraph Surfaces[UI Surfaces]
+        TUI[Ink TUI]
+        Mobile[Mobile / curl]
     end
 
-    subgraph electric["Electric Agents Runtime"]
-        STREAM["Durable Stream\n/assistant/{id}"]
+    subgraph Electric Agents Runtime [Electric Agent Streams]
+        AgentStream["/assistant/{id}\nappend-only stream"]
+        EpisodeStream["/episodes/main\nappend-only stream"]
     end
 
-    subgraph server["Agent Server (server.ts)"]
-        HANDLER["Entity Handler\n(LLM loop)"]
-        TOOLS["Tools\nbash · fetch_url · graphiti_search"]
+    subgraph server.ts [Agent Sandbox]
+        SDK[Electric Agents SDK]
+        Claude[Claude API]
+        Tools["bash · fetch_url\ngraphiti_search · add_episode"]
     end
 
-    subgraph memory["Memory Layer"]
-        PROC["Memory Processor\n(SSE watcher)"]
-        NEO4J["Neo4j\n(knowledge graph)"]
+    subgraph knowledge-processor.py [Knowledge Processor]
+        Watcher[SSE watcher]
+        Search[search API]
     end
 
-    CLAUDE["Anthropic API"]
+    Neo4j[(Neo4j + Graphiti)]
 
-    TUI -- "send message" --> STREAM
-    TUI -- "live stream (SSE)" --> STREAM
-    STREAM -- "webhook" --> HANDLER
-    HANDLER -- "reads history" --> STREAM
-    HANDLER -- "LLM calls" --> CLAUDE
-    HANDLER --> TOOLS
-    TOOLS -- "graphiti_search" --> PROC
-    PROC -- "tail stream (SSE)" --> STREAM
-    PROC -- "add_episode()" --> NEO4J
-    PROC -- "search()" --> NEO4J
+    Surfaces -->|POST send| AgentStream
+    AgentStream -->|SSE| Surfaces
+    AgentStream -->|webhook| SDK
+    SDK --> Claude
+    Claude --> Tools
+    Tools -->|add_episode| EpisodeStream
+    Tools -->|graphiti_search| Search
+    Search --> Neo4j
+    EpisodeStream -->|SSE tail| Watcher
+    Watcher -->|add_episode| Neo4j
 ```
 
 - **Every conversation** is a durable Electric stream — append-only, replayable, addressable by URL
-- **Every turn** is ingested by the memory processor: entities and relationships extracted by Graphiti, stored in Neo4j
-- **On each new turn**, the agent can call `graphiti_search` to retrieve relevant facts from any previous session
-- **Context window**: recent turns verbatim + on-demand graph retrieval for older facts — Graphiti is the compaction layer
+- **Agents write their own episodes** via the `add_episode` tool when they detect a fact, learned preference, or receive a document for ingestion
+- **The episodes stream** (`/episodes/main`) is an inert, durable log — the observable record of everything submitted for KG ingestion
+- **The knowledge processor** tails the episodes stream via SSE, tracks its own offset, and calls `graphiti.add_episode()` per event
+- **On each turn**, the agent can call `graphiti_search` to retrieve relevant facts from any previous session
+
+## Architectural decisions
+
+### Episodes as an agent stream
+
+Graphiti's core ingestion artifact is the [episode](https://help.getzep.com/graphiti/graphiti/concepts) — a unit of interaction from which entities and facts are extracted. Rather than passively inferring episodes from raw message pairs, agents here write episodes explicitly via an `add_episode` tool call, using Graphiti's own episode types as a guide:
+
+- `fact_triple` — an explicit factual assertion the agent has identified ("Nigel writes Clojure")
+- `text` — an unstructured document or corpus handed to the agent for ingestion
+- `json` — structured data
+
+These episodes are written to `/episodes/main` — a first-class Electric entity stream.
+
+The agent is the router: it classifies what kind of memory operation is needed and dispatches accordingly. Graphiti's haiku extraction step handles the rest.
 
 ## Stack
 
@@ -77,16 +102,9 @@ git clone https://github.com/nharsch/electric-graphiti
 cd electric-graphiti
 cp .env.example .env  # add your ANTHROPIC_API_KEY
 docker compose up -d
-npm install
 ```
 
 Everything runs in Docker: Electric Agents runtime, Neo4j, memory processor, and agent server. The server uses `network_mode: host` to receive webhook callbacks from the Electric Agents container.
-
-Open the TUI:
-
-```bash
-npx tsx tui.tsx
-```
 
 Pick a session or create one, start chatting. Memory is persisted to Neo4j automatically. Open a second session — the agent will recall facts from the first.
 
@@ -99,19 +117,13 @@ Pick a session or create one, start chatting. Memory is persisted to Neo4j autom
 ## Repo layout
 
 ```
-server.ts            — entity registry, LLM loop, graphiti_search tool
+server.ts            — entity registry, LLM loop, add_episode + graphiti_search tools
 tui.tsx              — Ink TUI (session picker, live stream, send)
-memory_processor.py  — SSE watcher → Graphiti ingest + search HTTP server
+memory_processor.py  — knowledge processor: SSE tail of /episodes/main → Graphiti + search API
 docker-compose.yml   — full stack
-Dockerfile           — memory-processor image
+Dockerfile           — knowledge-processor image
 Dockerfile.server    — agent server image
 ```
-
-## What's next
-
-- [ ] VPS deploy — session pickup across machines
-- [ ] Web UI — Vite + React, shared core with TUI, proxied through server.ts
-- [ ] `#remember` directives — operational memory as first-class stream events, injected into system prompt
 
 ## Related
 
