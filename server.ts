@@ -20,7 +20,7 @@ const registry = createEntityRegistry()
 const WORK_DIR = process.env.WORK_DIR ?? process.cwd()
 
 const bashTool = createBashTool(WORK_DIR)
-const fetchTool = createFetchUrlTool()
+const fetchTool = createFetchUrlTool({ modelConfig: { model: 'claude-haiku-4-5-20251001' } })
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
 if (!ANTHROPIC_API_KEY) {
