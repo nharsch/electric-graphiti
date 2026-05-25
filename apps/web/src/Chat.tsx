@@ -12,6 +12,7 @@ type Props = {
 export function Chat({ agentsUrl, entityType, entityId, onBack }: Props) {
   const { messages, status, agentRunning, send } = useStream(agentsUrl, entityType, entityId)
   const [input, setInput] = useState('')
+  const [confirmArchive, setConfirmArchive] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -55,7 +56,15 @@ export function Chat({ agentsUrl, entityType, entityId, onBack }: Props) {
         <button onClick={onBack} className="back">←</button>
         <span className="session-path">/{entityType}/{entityId}</span>
         <span className="status">{status}</span>
-        <button onClick={handleArchive} className="archive">archive</button>
+        {confirmArchive ? (
+          <span className="archive-confirm">
+            sure?
+            <button onClick={handleArchive}>yes</button>
+            <button onClick={() => setConfirmArchive(false)}>no</button>
+          </span>
+        ) : (
+          <button onClick={() => setConfirmArchive(true)} className="archive">archive</button>
+        )}
       </header>
 
       <div className="messages">

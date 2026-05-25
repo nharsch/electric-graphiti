@@ -14,6 +14,7 @@ export function Picker({ agentsUrl, entityType, onSelect }: Props) {
   const [naming, setNaming] = useState(false)
   const [name, setName] = useState('')
   const [error, setError] = useState('')
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   function startNaming() {
@@ -73,7 +74,15 @@ export function Picker({ agentsUrl, entityType, onSelect }: Props) {
                   {e.status} · {ago < 60 ? `${ago}m ago` : `${Math.round(ago / 60)}h ago`}
                 </span>
               </button>
-              <button className="archive-btn" onClick={() => archive(id)} title="Archive">×</button>
+              {confirmingId === id ? (
+                <span className="archive-confirm">
+                  sure?
+                  <button onClick={() => { archive(id); setConfirmingId(null) }}>yes</button>
+                  <button onClick={() => setConfirmingId(null)}>no</button>
+                </span>
+              ) : (
+                <button className="archive-btn" onClick={() => setConfirmingId(id)} title="Archive">×</button>
+              )}
             </li>
           )
         })}
