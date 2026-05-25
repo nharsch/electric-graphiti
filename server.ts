@@ -74,26 +74,55 @@ const webSearchTool = {
   },
 }
 
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
+const execFileAsync = promisify(execFile)
+
+async function htmlToText(html: string, prompt: string, anthropic: Anthropic): Promise<string> {
+  const msg = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 2048,
+    system: "Extract the requested information from the page content. Return only the extracted content, without commentary.",
+    messages: [{ role: "user", content: `${prompt}\n\n<page_content>\n${html.slice(0, 50000)}\n</page_content>` }],
+  })
+  const block = msg.content[0]
+  return block.type === "text" ? block.text : ""
+}
+
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })
 const fetchTool = createFetchUrlTool({
-  extractWithLLM: async (text, prompt) => {
-    const msg = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 2048,
-      system: "Extract the requested information from the page content. Return only the extracted content, without commentary about the extraction process.",
-      messages: [{ role: "user", content: `${prompt}\n\n<page_content>\n${text}\n</page_content>` }],
-    })
-    const block = msg.content[0]
-    return block.type === "text" ? block.text : ""
-  },
+  extractWithLLM: (text, prompt) => htmlToText(text, prompt, anthropic),
 })
+
+const fetchJsTool = {
+  name: "fetch_url_js",
+  label: "Fetch URL (JS)",
+  description: "Fetch a JS-rendered web page using headless Chromium. Use when fetch_url returns empty or incomplete content due to JavaScript rendering. Slower than fetch_url — only use when needed.",
+  parameters: Type.Object({
+    url: Type.String({ description: "The URL to fetch" }),
+    prompt: Type.String({ description: "What to extract from the page" }),
+  }),
+  async execute(_id: string, { url, prompt }: { url: string; prompt: string }) {
+    try {
+      const { stdout } = await execFileAsync("chromium", [
+        "--headless", "--disable-gpu", "--no-sandbox", "--dump-dom",
+        "--virtual-time-budget=5000", url,
+      ], { timeout: 20_000 })
+      const text = await htmlToText(stdout, prompt, anthropic)
+      return { content: [{ type: "text" as const, text }] }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { content: [{ type: "text" as const, text: `JS fetch failed: ${msg}` }] }
+    }
+  },
+}
 
 registry.define("assistant", {
   description: "Electric Graphiti assistant — durable stream + temporal memory",
   async handler(ctx) {
     console.log(`[handler] wake for ${ctx.entityUrl}, apiKey present: ${!!ANTHROPIC_API_KEY}`)
     ctx.useAgent({
-      systemPrompt: `You are a helpful assistant with access to bash, web search, web fetch, and persistent memory.
+      systemPrompt: `You are a helpful assistant with access to bash, web search, web fetch, and persistent memory. For JS-rendered sites where fetch_url returns empty content, use fetch_url_js (headless Chromium).
 
 When you identify something worth remembering — a factual claim, user preference, or receive a document for ingestion — call add_episode:
 - fact_triple: an explicit factual assertion ("user prefers X", "project uses Y", "X is defined as Y")
@@ -108,7 +137,7 @@ Keep responses concise.`,
         console.log(`[getApiKey] called for provider: ${provider}, key present: ${!!ANTHROPIC_API_KEY}`)
         return ANTHROPIC_API_KEY
       },
-      tools: [...ctx.electricTools, bashTool, fetchTool, webSearchTool],
+      tools: [...ctx.electricTools, bashTool, fetchTool, fetchJsTool, webSearchTool],
     })
     await ctx.agent.run()
   },
