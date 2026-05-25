@@ -10,7 +10,7 @@ type Props = {
 }
 
 export function Picker({ agentsUrl, entityType, onSelect }: Props) {
-  const { entities, spawn } = useSessions(agentsUrl, entityType)
+  const { entities, spawn, archive } = useSessions(agentsUrl, entityType)
   const [naming, setNaming] = useState(false)
   const [name, setName] = useState('')
   const [error, setError] = useState('')
@@ -65,7 +65,7 @@ export function Picker({ agentsUrl, entityType, onSelect }: Props) {
           const ago = Math.round((Date.now() - e.updated_at) / 60000)
           const label = e.tags.name || id
           return (
-            <li key={e.url}>
+            <li key={e.url} className="session-row">
               <button onClick={() => onSelect(id)}>
                 <span>{statusDot(e.status)}</span>
                 <span className="session-id">{label}</span>
@@ -73,6 +73,7 @@ export function Picker({ agentsUrl, entityType, onSelect }: Props) {
                   {e.status} · {ago < 60 ? `${ago}m ago` : `${Math.round(ago / 60)}h ago`}
                 </span>
               </button>
+              <button className="archive-btn" onClick={() => archive(id)} title="Archive">×</button>
             </li>
           )
         })}

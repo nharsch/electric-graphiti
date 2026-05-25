@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { EntityInfo } from './types.js'
-import { listEntities, spawnEntity as apiSpawnEntity } from './api.js'
+import { listEntities, spawnEntity as apiSpawnEntity, archiveEntity as apiArchiveEntity } from './api.js'
 
 export function useSessions(agentsUrl: string, entityType: string) {
   const [entities, setEntities] = useState<EntityInfo[]>([])
@@ -19,5 +19,10 @@ export function useSessions(agentsUrl: string, entityType: string) {
     await apiSpawnEntity(agentsUrl, entityType, entityId)
   }
 
-  return { entities, spawn }
+  async function archive(entityId: string): Promise<void> {
+    setEntities(prev => prev.filter(e => e.url.split('/').pop() !== encodeURIComponent(entityId)))
+    await apiArchiveEntity(agentsUrl, entityType, entityId)
+  }
+
+  return { entities, spawn, archive }
 }

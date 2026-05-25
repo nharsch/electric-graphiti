@@ -40,6 +40,17 @@ export async function spawnEntity(
   }
 }
 
+export async function archiveEntity(
+  agentsUrl: string,
+  entityType: string,
+  entityId: string
+): Promise<void> {
+  await fetch(
+    `${agentsUrl}/_electric/entities/${entityType}/${encodeURIComponent(entityId)}`,
+    { method: 'DELETE' }
+  )
+}
+
 export async function listEntities(
   agentsUrl: string,
   entityType: string
