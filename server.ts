@@ -76,6 +76,8 @@ const webSearchTool = {
 
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 const execFileAsync = promisify(execFile)
 
 async function htmlToText(html: string, prompt: string, anthropic: Anthropic): Promise<string> {
@@ -103,9 +105,11 @@ const fetchJsTool = {
     prompt: Type.String({ description: "What to extract from the page" }),
   }),
   async execute(_id: string, { url, prompt }: { url: string; prompt: string }) {
+    const userDataDir = await mkdtemp(`${tmpdir()}/chromium-`)
     try {
       const { stdout } = await execFileAsync("chromium", [
         "--headless", "--disable-gpu", "--no-sandbox", "--dump-dom",
+        "--disable-dev-shm-usage", `--user-data-dir=${userDataDir}`,
         "--virtual-time-budget=5000", url,
       ], { timeout: 20_000 })
       const text = await htmlToText(stdout, prompt, anthropic)
@@ -113,6 +117,8 @@ const fetchJsTool = {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       return { content: [{ type: "text" as const, text: `JS fetch failed: ${msg}` }] }
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true })
     }
   },
 }
