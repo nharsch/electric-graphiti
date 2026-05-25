@@ -1,0 +1,17 @@
+{
+  "name": "@electric-graphiti/tui",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx tui.tsx"
+  },
+  "dependencies": {
+    "@electric-graphiti/core": "*",
+    "ink": "^7.0.3",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.6"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.3"
+  }
+}

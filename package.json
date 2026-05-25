@@ -1,20 +1,16 @@
 {
   "name": "electric-graphiti",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*"],
   "type": "module",
+  "scripts": {
+    "server": "tsx server.ts",
+    "tui": "tsx apps/tui/tui.tsx"
+  },
   "dependencies": {
     "@electric-ax/agents-runtime": "^0.3.2",
     "@sinclair/typebox": "^0.34.49",
-    "ink": "^7.0.3",
-    "ink-text-input": "^6.0.0",
     "react": "^19.2.6"
   },
   "devDependencies": {
