@@ -2,23 +2,42 @@ import React, { useState, useEffect } from 'react'
 import { Picker } from './Picker.js'
 import { Chat } from './Chat.js'
 
-const AGENTS_URL = ''  // proxied through Vite dev server; empty = same origin
+const AGENTS_URL = ''
 const ENTITY_TYPE = 'assistant'
 
+function parseHash(): string | null {
+  const m = window.location.hash.match(/^#\/[^/]+\/([^/]+)$/)
+  return m ? decodeURIComponent(m[1]) : null
+}
+
 export function App() {
-  const [entityId, setEntityId] = useState<string | null>(null)
+  const [entityId, setEntityId] = useState<string | null>(parseHash)
 
   useEffect(() => {
-    // Prevent the virtual keyboard from resizing the viewport on Android Chrome,
-    // which causes layout reflow that drops textarea focus.
     if ('virtualKeyboard' in navigator) {
       (navigator as any).virtualKeyboard.overlaysContent = true
     }
   }, [])
 
-  if (!entityId) {
-    return <Picker agentsUrl={AGENTS_URL} entityType={ENTITY_TYPE} onSelect={setEntityId} />
+  useEffect(() => {
+    function onHashChange() {
+      setEntityId(parseHash())
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
+
+  function navigate(id: string) {
+    window.location.hash = `/${ENTITY_TYPE}/${encodeURIComponent(id)}`
   }
 
-  return <Chat agentsUrl={AGENTS_URL} entityType={ENTITY_TYPE} entityId={entityId} onBack={() => setEntityId(null)} />
+  function goBack() {
+    window.history.back()
+  }
+
+  if (!entityId) {
+    return <Picker agentsUrl={AGENTS_URL} entityType={ENTITY_TYPE} onSelect={navigate} />
+  }
+
+  return <Chat agentsUrl={AGENTS_URL} entityType={ENTITY_TYPE} entityId={entityId} onBack={goBack} />
 }
