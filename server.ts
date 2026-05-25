@@ -7,6 +7,7 @@ import {
   createEntityRegistry,
   createRuntimeHandler,
 } from "@electric-ax/agents-runtime"
+import Anthropic from "@anthropic-ai/sdk"
 import { createBashTool, createFetchUrlTool } from "@electric-ax/agents-runtime/tools"
 
 const ELECTRIC_AGENTS_URL =
@@ -20,7 +21,6 @@ const registry = createEntityRegistry()
 const WORK_DIR = process.env.WORK_DIR ?? process.cwd()
 
 const bashTool = createBashTool(WORK_DIR)
-const fetchTool = createFetchUrlTool({ modelConfig: { model: 'claude-haiku-4-5-20251001' } })
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
 if (!ANTHROPIC_API_KEY) {
@@ -28,12 +28,72 @@ if (!ANTHROPIC_API_KEY) {
   process.exit(1)
 }
 
+function parseDdgHtml(html: string): string {
+  // Extract result titles, URLs, and snippets from DDG HTML response
+  const results: string[] = []
+  const resultRegex = /<a class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g
+  let match
+  while ((match = resultRegex.exec(html)) !== null && results.length < 8) {
+    const url = match[1]
+    const title = match[2].replace(/<[^>]+>/g, '').trim()
+    const snippet = match[3].replace(/<[^>]+>/g, '').trim()
+    results.push(`**${title}**\n${url}\n${snippet}`)
+  }
+  if (results.length === 0) {
+    // Fallback: just strip all tags and return trimmed text
+    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 3000)
+  }
+  return results.join('\n\n')
+}
+
+const webSearchTool = {
+  name: "web_search",
+  label: "Web Search",
+  description: "Search the web using DuckDuckGo. Returns titles, URLs, and snippets for the top results.",
+  parameters: Type.Object({
+    query: Type.String({ description: "Search query" }),
+  }),
+  async execute(_id: string, { query }: { query: string }) {
+    try {
+      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; electric-graphiti/1.0)",
+          "Accept": "text/html",
+        },
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const html = await res.text()
+      const text = parseDdgHtml(html)
+      return { content: [{ type: "text" as const, text }] }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { content: [{ type: "text" as const, text: `Search failed: ${msg}` }] }
+    }
+  },
+}
+
+const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })
+const fetchTool = createFetchUrlTool({
+  extractWithLLM: async (text, prompt) => {
+    const msg = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 2048,
+      system: "Extract the requested information from the page content. Return only the extracted content, without commentary about the extraction process.",
+      messages: [{ role: "user", content: `${prompt}\n\n<page_content>\n${text}\n</page_content>` }],
+    })
+    const block = msg.content[0]
+    return block.type === "text" ? block.text : ""
+  },
+})
+
 registry.define("assistant", {
   description: "Electric Graphiti assistant — durable stream + temporal memory",
   async handler(ctx) {
     console.log(`[handler] wake for ${ctx.entityUrl}, apiKey present: ${!!ANTHROPIC_API_KEY}`)
     ctx.useAgent({
-      systemPrompt: `You are a helpful assistant with access to bash, web fetch, and persistent memory.
+      systemPrompt: `You are a helpful assistant with access to bash, web search, web fetch, and persistent memory.
 
 When you identify something worth remembering — a factual claim, user preference, or receive a document for ingestion — call add_episode:
 - fact_triple: an explicit factual assertion ("user prefers X", "project uses Y", "X is defined as Y")
@@ -48,7 +108,7 @@ Keep responses concise.`,
         console.log(`[getApiKey] called for provider: ${provider}, key present: ${!!ANTHROPIC_API_KEY}`)
         return ANTHROPIC_API_KEY
       },
-      tools: [...ctx.electricTools, bashTool, fetchTool],
+      tools: [...ctx.electricTools, bashTool, fetchTool, webSearchTool],
     })
     await ctx.agent.run()
   },
