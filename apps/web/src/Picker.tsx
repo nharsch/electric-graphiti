@@ -13,25 +13,44 @@ export function Picker({ agentsUrl, entityType, onSelect }: Props) {
   const { entities, spawn } = useSessions(agentsUrl, entityType)
   const [naming, setNaming] = useState(false)
   const [name, setName] = useState('')
+  const [error, setError] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   function startNaming() {
     setNaming(true)
     setName('')
+    setError('')
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
-  function create() {
-    const id = randomUUID()
-    spawn(id, name.trim() || undefined).catch(() => {})
+  function cancel() {
     setNaming(false)
     setName('')
+    setError('')
+  }
+
+  function create() {
+    const trimmed = name.trim()
+    const id = trimmed || randomUUID()
+
+    if (trimmed) {
+      const taken = entities.some(
+        e => decodeURIComponent(e.url.split('/').pop()!) === trimmed
+      )
+      if (taken) {
+        setError(`"${trimmed}" is already taken`)
+        return
+      }
+    }
+
+    spawn(id).catch(() => {})
+    cancel()
     onSelect(id)
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter') create()
-    if (e.key === 'Escape') { setNaming(false); setName('') }
+    if (e.key === 'Escape') cancel()
   }
 
   const statusDot = (s: string) =>
@@ -63,18 +82,19 @@ export function Picker({ agentsUrl, entityType, onSelect }: Props) {
               <input
                 ref={inputRef}
                 value={name}
-                onChange={e => setName(e.target.value)}
+                onChange={e => { setName(e.target.value); setError('') }}
                 onKeyDown={handleKeyDown}
                 placeholder="session name (optional)"
               />
               <button onClick={create}>create</button>
-              <button onClick={() => { setNaming(false); setName('') }} className="cancel">✕</button>
+              <button onClick={cancel} className="cancel">✕</button>
             </div>
           ) : (
             <button onClick={startNaming} className="new-session">
               + New session
             </button>
           )}
+          {error && <p className="name-error">{error}</p>}
         </li>
       </ul>
     </div>

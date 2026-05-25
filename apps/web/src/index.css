@@ -107,6 +107,13 @@ body {
   color: var(--muted);
 }
 
+.picker .name-error {
+  color: #f87171;
+  font-size: 0.8rem;
+  margin-top: 0.4rem;
+  padding-left: 0.25rem;
+}
+
 /* ── Chat ── */
 .chat {
   display: flex;

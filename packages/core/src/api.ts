@@ -21,8 +21,7 @@ export async function sendMessage(sendUrl: string, text: string): Promise<void> 
 export async function spawnEntity(
   agentsUrl: string,
   entityType: string,
-  entityId: string,
-  tags?: Record<string, string>
+  entityId: string
 ): Promise<void> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 4000)
@@ -32,7 +31,7 @@ export async function spawnEntity(
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(tags ? { tags } : {}),
+        body: JSON.stringify({}),
         signal: ctrl.signal,
       }
     )
