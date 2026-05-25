@@ -179,6 +179,19 @@ header {
 
 .status { color: var(--muted); font-size: 0.8rem; }
 
+.archive {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.archive:hover { color: #f87171; border-color: #f87171; }
+
 .messages {
   flex: 1;
   overflow-y: auto;

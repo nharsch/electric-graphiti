@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { useStream } from '@electric-graphiti/core'
+import { useStream, archiveEntity } from '@electric-graphiti/core'
 import type { Message } from '@electric-graphiti/core'
 
 type Props = {
@@ -44,12 +44,18 @@ export function Chat({ agentsUrl, entityType, entityId, onBack }: Props) {
     submit()
   }
 
+  async function handleArchive() {
+    await archiveEntity(agentsUrl, entityType, entityId)
+    onBack()
+  }
+
   return (
     <div className="chat">
       <header>
         <button onClick={onBack} className="back">←</button>
         <span className="session-path">/{entityType}/{entityId}</span>
         <span className="status">{status}</span>
+        <button onClick={handleArchive} className="archive">archive</button>
       </header>
 
       <div className="messages">
