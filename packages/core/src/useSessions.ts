@@ -15,8 +15,8 @@ export function useSessions(agentsUrl: string, entityType: string) {
       .catch(() => {})
   }, [agentsUrl, entityType])
 
-  async function spawn(entityId: string): Promise<void> {
-    await apiSpawnEntity(agentsUrl, entityType, entityId)
+  async function spawn(entityId: string, name?: string): Promise<void> {
+    await apiSpawnEntity(agentsUrl, entityType, entityId, name ? { name } : undefined)
   }
 
   return { entities, spawn }

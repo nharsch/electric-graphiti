@@ -15,4 +15,5 @@ export type EntityInfo = {
   url: string
   status: string
   updated_at: number
+  tags: Record<string, string>
 }
