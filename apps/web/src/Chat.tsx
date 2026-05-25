@@ -13,16 +13,35 @@ export function Chat({ agentsUrl, entityType, entityId, onBack }: Props) {
   const { messages, status, agentRunning, send } = useStream(agentsUrl, entityType, entityId)
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, agentRunning])
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!input.trim()) return
+  useEffect(() => {
+    const ta = textareaRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = `${ta.scrollHeight}px`
+  }, [input])
+
+  function submit() {
+    if (!input.trim() || agentRunning) return
     send(input)
     setInput('')
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      submit()
+    }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    submit()
   }
 
   return (
@@ -50,11 +69,14 @@ export function Chat({ agentsUrl, entityType, entityId, onBack }: Props) {
       </div>
 
       <form onSubmit={handleSubmit} className="input-row">
-        <input
+        <textarea
+          ref={textareaRef}
           value={input}
           onChange={e => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onTouchEnd={() => textareaRef.current?.focus()}
           placeholder="type a message…"
-          autoFocus
+          rows={1}
         />
         <button type="submit" disabled={!input.trim() || agentRunning}>send</button>
       </form>

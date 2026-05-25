@@ -23,14 +23,21 @@ export async function spawnEntity(
   entityType: string,
   entityId: string
 ): Promise<void> {
-  await fetch(
-    `${agentsUrl}/_electric/entities/${entityType}/${encodeURIComponent(entityId)}`,
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    }
-  )
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 4000)
+  try {
+    await fetch(
+      `${agentsUrl}/_electric/entities/${entityType}/${encodeURIComponent(entityId)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+        signal: ctrl.signal,
+      }
+    )
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export async function listEntities(

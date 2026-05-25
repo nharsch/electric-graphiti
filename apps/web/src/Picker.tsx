@@ -12,9 +12,9 @@ type Props = {
 export function Picker({ agentsUrl, entityType, onSelect }: Props) {
   const { entities, spawn } = useSessions(agentsUrl, entityType)
 
-  async function handleNew() {
+  function handleNew() {
     const id = randomUUID()
-    await spawn(id)
+    spawn(id).catch(() => {})
     onSelect(id)
   }
 

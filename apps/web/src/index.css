@@ -1,5 +1,9 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+button, a, input, textarea, [role="button"] {
+  touch-action: manipulation;
+}
+
 :root {
   --bg: #0f0f0f;
   --surface: #1a1a1a;
@@ -134,11 +138,12 @@ header {
   display: flex;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
+  padding-bottom: calc(0.75rem + env(keyboard-inset-height, 0px));
   border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
 
-.input-row input {
+.input-row textarea {
   flex: 1;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -146,11 +151,18 @@ header {
   padding: 0.6rem 0.75rem;
   border-radius: 6px;
   font-family: inherit;
-  font-size: inherit;
+  font-size: 16px;
+  line-height: 1.5;
   outline: none;
+  touch-action: manipulation;
+  cursor: text;
+  resize: none;
+  overflow-y: hidden;
+  max-height: 200px;
 }
 
-.input-row input:focus { border-color: var(--accent); }
+.input-row textarea:focus { border-color: var(--accent); }
+
 
 .input-row button {
   background: var(--accent);
